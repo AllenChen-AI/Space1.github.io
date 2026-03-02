@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>空間幾何質樸實驗室 - 三垂線與二面角</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;900&family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-color: #f5f2eb;
+            --text-main: #4a4238;
+            --accent-green: #829e88;
+            --accent-red: #c67b6b;
+            --accent-blue: #6d8494;
+            --accent-gold: #d4b26a;
+        }
+
+        body { 
+            margin: 0; overflow: hidden; 
+            background-color: var(--bg-color); 
+            font-family: 'Noto Sans TC', sans-serif;
+            color: var(--text-main);
+        }
+        
+        .font-serif-tc { font-family: 'Noto Serif TC', serif; }
+
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+        .pointer-auto { pointer-events: auto; }
+        
+        /* Wenqing Panel Style */
+        .wenqing-panel {
+            background: rgba(253, 251, 247, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0,0,0,0.02);
+        }
+
+        /* Minimalist Slider */
+        input[type=range] {
+            -webkit-appearance: none; width: 100%; background: transparent; padding: 8px 0;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 14px; width: 14px; border-radius: 50%;
+            background: var(--text-main); cursor: pointer; margin-top: -5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2); transition: transform 0.1s;
+        }
+        input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 3px; cursor: pointer; background: rgba(0,0,0,0.1); border-radius: 2px;
+        }
+
+        /* Soft Tabs */
+        .tab-btn {
+            color: #888; border-bottom: 2px solid transparent; transition: all 0.3s;
+        }
+        .tab-btn.active {
+            color: var(--text-main); border-bottom: 2px solid var(--accent-red); font-weight: 500;
+        }
+
+        /* 3D Labels */
+        .label-3d {
+            position: absolute; top: 0; left: 0;
+            color: var(--text-main);
+            font-family: 'Noto Serif TC', serif;
+            font-weight: 600; font-size: 16px;
+            text-shadow: 0px 0px 4px rgba(255,255,255,0.9), 0px 0px 8px rgba(255,255,255,0.8);
+            pointer-events: none; transform: translate(-50%, -50%); transition: all 0.2s;
+        }
+        .label-bg {
+            background: rgba(255,255,255,0.8); border: 1px solid rgba(0,0,0,0.1);
+            padding: 2px 8px; border-radius: 12px; font-size: 13px; font-family: 'Noto Sans TC', sans-serif;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        /* Feedback Box */
+        .feedback-box {
+            transition: all 0.4s ease; border-left: 3px solid transparent;
+        }
+        .feedback-success {
+            background: rgba(130, 158, 136, 0.1); border-left-color: var(--accent-green);
+        }
+        .feedback-normal {
+            background: rgba(0, 0, 0, 0.02); border-left-color: rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 新增：橫屏提示，強烈建議手機用戶橫屏使用 -->
+    <div id="landscape-prompt" class="fixed inset-0 z-50 bg-[#f5f2eb] flex flex-col justify-center items-center text-stone-600 portrait:flex landscape:hidden">
+        <i data-lucide="smartphone" class="w-12 h-12 mb-4 animate-[pulse_2s_ease-in-out_infinite]" style="transform: rotate(90deg);"></i>
+        <p class="font-serif-tc text-lg font-bold">請旋轉設備至橫向模式</p>
+        <p class="text-sm mt-2">以獲得最佳的 3D 互動體驗</p>
+    </div>
+
+    <div id="canvas-container"></div>
+    <div id="labels-container" class="absolute top-0 left-0 w-full h-full pointer-events-none" style="z-index: 5;"></div>
+
+    <!-- UI 面板已改為靠左 (justify-start)，並加上自適應高度 h-full -->
+    <div id="ui-layer" class="flex p-4 sm:p-6 gap-6 justify-start h-full">
+        
+        <!-- Control Panel: 寬度縮短為原來的 2/3 (約 280px)，調整 padding 與內部間距 -->
+        <div class="wenqing-panel rounded-2xl p-5 w-full sm:w-[280px] flex flex-col pointer-auto h-fit shrink-0 max-h-[100%] overflow-y-auto">
+            
+            <div class="mb-4 text-center">
+                <h1 class="text-xl font-serif-tc font-bold tracking-widest text-stone-800 mb-2">空間幾何實驗室</h1>
+                <div class="h-[1px] w-12 bg-stone-300 mx-auto"></div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="flex gap-2 mb-6 border-b border-stone-200">
+                <button class="tab-btn active pb-2 flex-1 text-xs tracking-wide" onclick="setMode('m1')">三垂線</button>
+                <button class="tab-btn pb-2 flex-1 text-xs tracking-wide" onclick="setMode('m2_pyramid')">二面角(錐)</button>
+                <button class="tab-btn pb-2 flex-1 text-xs tracking-wide" onclick="setMode('m2_paper')">二面角(紙)</button>
+            </div>
+
+            <!-- Mode 1: 三垂線定理 -->
+            <div id="panel-m1" class="flex flex-col gap-4">
+                <div class="text-xs leading-relaxed text-stone-600 font-serif-tc bg-stone-50 p-3 rounded-xl border border-stone-100">
+                    <p>已知三角錐 <strong>P-ACD</strong> 中，高 <strong>PA</strong> 垂直於底面。</p>
+                    <p>若在底面邊緣 <strong>CD</strong> 找一點 <strong>B</strong>，使得 <strong>AB ⊥ CD</strong>，<strong>PB</strong> 是否也垂直於 <strong>CD</strong>？</p>
+                </div>
+                
+                <div class="flex flex-col gap-2">
+                    <label class="text-xs font-medium flex justify-between">
+                        <span class="text-stone-700">滑動點 B (於邊 CD 上)</span>
+                    </label>
+                    <input type="range" id="slider-zb" min="-6" max="6" step="0.1" value="3">
+                    <div class="flex justify-between text-[10px] text-stone-400 font-serif-tc px-1">
+                        <span>往 C 點</span><span>往 D 點</span>
+                    </div>
+                </div>
+
+                <div class="feedback-box feedback-normal p-3 rounded-r-lg flex flex-col gap-2 mt-1" id="status-m1">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs text-stone-500">平面角 ∠ABC</span>
+                        <span id="angle-abc" class="font-serif-tc text-base font-bold text-stone-700">0.0°</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs text-stone-500">空間角 ∠PBC</span>
+                        <span id="angle-pbc" class="font-serif-tc text-base font-bold text-stone-700">0.0°</span>
+                    </div>
+                    <div id="msg-m1" class="mt-1 text-xs font-bold text-[#c67b6b] pt-2 border-t border-stone-200">
+                        請移動點 B，直到 AB ⊥ CD
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mode 2: 二面角 (三角錐) -->
+            <div id="panel-m2_pyramid" class="hidden flex-col gap-4">
+                <div class="text-xs leading-relaxed text-stone-600 font-serif-tc bg-stone-50 p-3 rounded-xl border border-stone-100">
+                    <p>觀察正三角錐 <strong>V-ABC</strong> 側面 <strong>VBC</strong> 與底面 <strong>ABC</strong> 的夾角。</p>
+                    <p>取交線 <strong>BC</strong> 中點 <strong>M</strong>，則 <strong>VM ⊥ BC</strong> 且 <strong>AM ⊥ BC</strong>，故 <strong>∠VMA</strong> 即為此二面角。</p>
+                </div>
+                
+                <div class="flex flex-col gap-2">
+                    <label class="text-xs font-medium flex justify-between">
+                        <span class="text-stone-700">調整錐體高度 (點 V)</span>
+                    </label>
+                    <input type="range" id="slider-hv" min="2" max="10" step="0.1" value="5">
+                </div>
+
+                <div class="p-3 rounded-lg bg-stone-50 border border-stone-100 flex justify-between items-center mt-1">
+                    <span class="text-xs font-medium text-stone-600">二面角 ∠VMA</span>
+                    <span id="angle-vma" class="font-serif-tc text-xl font-bold text-[#6d8494]">0.0°</span>
+                </div>
+            </div>
+
+            <!-- Mode 3: 二面角 (摺紙) -->
+            <div id="panel-m2_paper" class="hidden flex-col gap-3">
+                <div class="text-xs leading-relaxed text-stone-600 font-serif-tc bg-stone-50 p-3 rounded-xl border border-stone-100">
+                    <p>將色紙對摺，兩半平面的夾角即為二面角。在交線上取一點向兩側作垂直線，夾角即為展開角度。</p>
+                </div>
+
+                <div class="flex flex-col gap-2">
+                    <!-- 紙張形狀切換 -->
+                    <div class="flex bg-stone-200/50 rounded-lg p-1 border border-stone-200">
+                        <button id="btn-shape-sq" class="flex-1 py-1 text-xs rounded-md bg-white shadow-sm text-stone-700 font-medium transition-all" onclick="setPaperShape('square')">正方色紙</button>
+                        <button id="btn-shape-rect" class="flex-1 py-1 text-xs rounded-md text-stone-500 hover:text-stone-700 transition-all" onclick="setPaperShape('rectangle')">矩形色紙</button>
+                    </div>
+                    <!-- 對摺方式切換 -->
+                    <div class="flex bg-stone-200/50 rounded-lg p-1 border border-stone-200">
+                        <button id="btn-fold-edge" class="flex-1 py-1 text-xs rounded-md bg-white shadow-sm text-stone-700 font-medium transition-all" onclick="setFoldType('edge')">邊對齊對摺</button>
+                        <button id="btn-fold-diag" class="flex-1 py-1 text-xs rounded-md text-stone-500 hover:text-stone-700 transition-all" onclick="setFoldType('diagonal')">對角線對摺</button>
+                    </div>
+                </div>
+                
+                <div class="flex flex-col gap-2 mt-1">
+                    <label class="text-xs font-medium flex justify-between">
+                        <span class="text-stone-700">展開角度</span>
+                    </label>
+                    <input type="range" id="slider-fold" min="10" max="180" step="1" value="60">
+                </div>
+
+                <div class="p-3 rounded-lg bg-stone-50 border border-stone-100 flex justify-between items-center">
+                    <span class="text-xs font-medium text-stone-600">二面角角度</span>
+                    <span id="angle-fold" class="font-serif-tc text-xl font-bold text-[#829e88]">60°</span>
+                </div>
+            </div>
+
+            <div class="mt-6 flex items-center justify-center gap-1.5 text-[11px] text-stone-400 font-sans text-center">
+                <i data-lucide="rotate-3d" class="w-3.5 h-3.5"></i>
+                <span>雙指縮放與旋轉 ‧ 滑桿單指操作</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        lucide.createIcons();
+
+        // --- State ---
+        const state = {
+            mode: 'm1', // 'm1', 'm2_pyramid', 'm2_paper'
+            paperShape: 'square', // 'square', 'rectangle'
+            foldType: 'edge', // 'edge', 'diagonal'
+            m1: { z_b: 3 },
+            m2p: { h_v: 5 },
+            m2f: { foldAngle: 60 }
+        };
+
+        // --- DOM Elements ---
+        const ui = {
+            tabs: document.querySelectorAll('.tab-btn'),
+            panels: {
+                m1: document.getElementById('panel-m1'),
+                m2_pyramid: document.getElementById('panel-m2_pyramid'),
+                m2_paper: document.getElementById('panel-m2_paper')
+            },
+            sliderZb: document.getElementById('slider-zb'),
+            sliderHv: document.getElementById('slider-hv'),
+            sliderFold: document.getElementById('slider-fold'),
+            angleABC: document.getElementById('angle-abc'),
+            anglePBC: document.getElementById('angle-pbc'),
+            msgM1: document.getElementById('msg-m1'),
+            statusM1: document.getElementById('status-m1'),
+            angleVMA: document.getElementById('angle-vma'),
+            angleFold: document.getElementById('angle-fold'),
+            btnSq: document.getElementById('btn-shape-sq'),
+            btnRect: document.getElementById('btn-shape-rect'),
+            btnFoldEdge: document.getElementById('btn-fold-edge'),
+            btnFoldDiag: document.getElementById('btn-fold-diag')
+        };
+
+        // --- Three.js Setup ---
+        const container = document.getElementById('canvas-container');
+        const labelsContainer = document.getElementById('labels-container');
+        
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#f5f2eb');
+        scene.fog = new THREE.FogExp2('#f5f2eb', 0.015);
+
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        
+        // --- 設定觸控邏輯 ---
+        // 規定單指不操作畫布 (保留給操作滑桿與滾動UI)，雙指用來旋轉與縮放 3D 圖形
+        controls.touches = {
+            ONE: THREE.TOUCH.NONE,
+            TWO: THREE.TOUCH.DOLLY_ROTATE
+        };
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfffaee, 0.6);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 15;
+        dirLight.shadow.camera.bottom = -15;
+        dirLight.shadow.camera.left = -15;
+        dirLight.shadow.camera.right = 15;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+        
+        const fillLight = new THREE.DirectionalLight(0xebe2d5, 0.4);
+        fillLight.position.set(-10, 5, -10);
+        scene.add(fillLight);
+
+        const dynamicGroup = new THREE.Group();
+        scene.add(dynamicGroup);
+
+        const groundGeo = new THREE.PlaneGeometry(100, 100);
+        const groundMat = new THREE.ShadowMaterial({ opacity: 0.08 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.05;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // --- Color Palette & Materials ---
+        const palette = {
+            red: 0xc67b6b, green: 0x829e88, blue: 0x6d8494, gold: 0xd4b26a,
+            dark: 0x4a4238, paper1: 0xf4f1ea, paper2: 0xeae4d8
+        };
+
+        const createMat = (color, opacity=1) => new THREE.MeshStandardMaterial({
+            color: color, roughness: 0.8, metalness: 0.1,
+            transparent: opacity < 1, opacity: opacity, side: THREE.DoubleSide
+        });
+
+        const mats = {
+            face: createMat(0xffffff, 0.4),
+            faceBase: createMat(0xeae4d8, 0.7),
+            facePaper1: createMat(palette.paper1, 1),
+            facePaper2: createMat(palette.paper2, 1),
+            lineRed: new THREE.MeshBasicMaterial({ color: palette.red }),
+            lineGreen: new THREE.MeshBasicMaterial({ color: palette.green }),
+            lineBlue: new THREE.MeshBasicMaterial({ color: palette.blue }),
+            lineGold: new THREE.MeshBasicMaterial({ color: palette.gold }),
+            lineDark: new THREE.MeshBasicMaterial({ color: palette.dark }),
+            point: new THREE.MeshBasicMaterial({ color: palette.dark })
+        };
+
+        // --- Geometry Helpers ---
+        function createCylinder(p1, p2, material, radius = 0.06) {
+            const distance = p1.distanceTo(p2);
+            if(distance < 0.001) return new THREE.Group();
+            const geometry = new THREE.CylinderGeometry(radius, radius, distance, 12);
+            geometry.translate(0, distance / 2, 0);
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.copy(p1);
+            mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p2.clone().sub(p1).normalize());
+            mesh.castShadow = true;
+            return mesh;
+        }
+
+        function createSphere(p, material, radius = 0.12) {
+            const geometry = new THREE.SphereGeometry(radius, 16, 16);
+            return new THREE.Mesh(geometry, material);
+        }
+
+        function createRightAngle(pVertex, v1, v2, size = 0.7, color = palette.dark) {
+            const d1 = v1.clone().normalize().multiplyScalar(size);
+            const d2 = v2.clone().normalize().multiplyScalar(size);
+            const p1 = pVertex.clone().add(d1);
+            const p2 = pVertex.clone().add(d2);
+            const p3 = pVertex.clone().add(d1).add(d2);
+            const mat = new THREE.LineBasicMaterial({ color: color, linewidth: 2 });
+            const points = [p1, p3, p2];
+            return new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), mat);
+        }
+
+        function createTriangleFace(p1, p2, p3, material) {
+            const geo = new THREE.BufferGeometry();
+            const vertices = new Float32Array([
+                p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z
+            ]);
+            geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geo.computeVertexNormals();
+            const mesh = new THREE.Mesh(geo, material);
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        // --- Label System ---
+        let activeLabels = [];
+        function addLabel(text, pos3D, styleClass = "") {
+            const el = document.createElement('div');
+            el.className = `label-3d ${styleClass}`;
+            el.innerHTML = text;
+            labelsContainer.appendChild(el);
+            activeLabels.push({ el, pos3D });
+        }
+        function clearLabels() {
+            labelsContainer.innerHTML = '';
+            activeLabels = [];
+        }
+        function renderLabels() {
+            activeLabels.forEach(label => {
+                const pos = label.pos3D.clone();
+                pos.project(camera);
+                if (pos.z > 1 || pos.z < -1) {
+                    label.el.style.display = 'none';
+                } else {
+                    label.el.style.display = 'block';
+                    const x = (pos.x * .5 + .5) * window.innerWidth;
+                    const y = (pos.y * -.5 + .5) * window.innerHeight;
+                    label.el.style.left = `${x}px`;
+                    label.el.style.top = `${y}px`;
+                }
+            });
+        }
+
+        // --- Interaction Setup ---
+        window.setMode = (m) => {
+            state.mode = m;
+            ui.tabs.forEach((tab, idx) => {
+                tab.classList.remove('active');
+                if(m==='m1' && idx===0) tab.classList.add('active');
+                if(m==='m2_pyramid' && idx===1) tab.classList.add('active');
+                if(m==='m2_paper' && idx===2) tab.classList.add('active');
+            });
+            Object.values(ui.panels).forEach(p => p.style.display = 'none');
+            ui.panels[m].style.display = 'flex';
+            
+            // 視角偏移至右側 (tx=-2)，避免被左側控制面板遮擋
+            if(m === 'm1') gsapCamera(12, 10, 16, -2, 2, 0);
+            if(m === 'm2_pyramid') gsapCamera(10, 8, 18, -2, 2, 0);
+            if(m === 'm2_paper') gsapCamera(8, 12, 16, -2, 0, 0);
+            
+            updateScene();
+        };
+
+        window.setPaperShape = (s) => {
+            state.paperShape = s;
+            ui.btnSq.className = s === 'square' ? "flex-1 py-1 text-xs rounded-md bg-white shadow-sm text-stone-700 font-medium transition-all" : "flex-1 py-1 text-xs rounded-md text-stone-500 hover:text-stone-700 transition-all";
+            ui.btnRect.className = s === 'rectangle' ? "flex-1 py-1 text-xs rounded-md bg-white shadow-sm text-stone-700 font-medium transition-all" : "flex-1 py-1 text-xs rounded-md text-stone-500 hover:text-stone-700 transition-all";
+            updateScene();
+        }
+
+        window.setFoldType = (t) => {
+            state.foldType = t;
+            ui.btnFoldEdge.className = t === 'edge' ? "flex-1 py-1 text-xs rounded-md bg-white shadow-sm text-stone-700 font-medium transition-all" : "flex-1 py-1 text-xs rounded-md text-stone-500 hover:text-stone-700 transition-all";
+            ui.btnFoldDiag.className = t === 'diagonal' ? "flex-1 py-1 text-xs rounded-md bg-white shadow-sm text-stone-700 font-medium transition-all" : "flex-1 py-1 text-xs rounded-md text-stone-500 hover:text-stone-700 transition-all";
+            updateScene();
+        }
+
+        ui.sliderZb.addEventListener('input', e => { state.m1.z_b = parseFloat(e.target.value); updateScene(); });
+        ui.sliderHv.addEventListener('input', e => { state.m2p.h_v = parseFloat(e.target.value); updateScene(); });
+        ui.sliderFold.addEventListener('input', e => { state.m2f.foldAngle = parseFloat(e.target.value); updateScene(); });
+
+        function gsapCamera(cx, cy, cz, tx, ty, tz) {
+            camera.position.set(cx, cy, cz);
+            controls.target.set(tx, ty, tz);
+        }
+
+        function updateScene() {
+            while(dynamicGroup.children.length > 0){ 
+                dynamicGroup.remove(dynamicGroup.children[0]); 
+            }
+            clearLabels();
+
+            if(state.mode === 'm1') buildMode1();
+            else if(state.mode === 'm2_pyramid') buildMode2Pyramid();
+            else if(state.mode === 'm2_paper') buildMode2Paper();
+        }
+
+        // --- Build Mode 1: 三垂線定理錐體 ---
+        function buildMode1() {
+            const h = 7; 
+            const dx = 6; 
+            const pA = new THREE.Vector3(0, 0, 0);
+            const pP = new THREE.Vector3(0, h, 0);
+            const pC = new THREE.Vector3(dx, 0, -6);
+            const pD = new THREE.Vector3(dx, 0, 6);
+            
+            const zB = state.m1.z_b;
+            const pB = new THREE.Vector3(dx, 0, zB);
+
+            const dirCD = new THREE.Vector3(0, 0, 1);
+            const vecAB = new THREE.Vector3().subVectors(pB, pA);
+            const vecPB = new THREE.Vector3().subVectors(pB, pP);
+
+            const angleABC = (Math.acos(vecAB.normalize().dot(dirCD)) * 180 / Math.PI);
+            const displayABC = zB <= 0 ? angleABC : 180 - angleABC; 
+            const isRightAngle = Math.abs(displayABC - 90) < 0.5;
+
+            // Faces
+            dynamicGroup.add(createTriangleFace(pA, pC, pD, mats.faceBase)); 
+            dynamicGroup.add(createTriangleFace(pP, pA, pD, mats.face)); 
+            dynamicGroup.add(createTriangleFace(pP, pA, pC, mats.face)); 
+            dynamicGroup.add(createTriangleFace(pP, pC, pD, createMat(0xffffff, 0.1)));
+
+            // Edges
+            const addEdge = (p1, p2, mat, rad=0.04) => dynamicGroup.add(createCylinder(p1, p2, mat, rad));
+            addEdge(pP, pA, mats.lineDark, 0.08); 
+            addEdge(pA, pC, mats.lineDark, 0.04);
+            addEdge(pA, pD, mats.lineDark, 0.04);
+            addEdge(pP, pC, mats.lineDark, 0.04);
+            addEdge(pP, pD, mats.lineDark, 0.04);
+            addEdge(pC, pD, mats.lineDark, 0.08); 
+
+            addEdge(pA, pB, mats.lineRed, 0.08); 
+            addEdge(pP, pB, isRightAngle ? mats.lineGreen : mats.lineBlue, 0.08); 
+
+            // Points
+            [pP, pA, pC, pD].forEach(p => {
+                const mesh = createSphere(p, mats.point, 0.15);
+                mesh.position.copy(p);
+                dynamicGroup.add(mesh);
+            });
+            const pBMesh = createSphere(pB, isRightAngle ? mats.lineGreen : mats.lineRed, 0.2);
+            pBMesh.position.copy(pB);
+            dynamicGroup.add(pBMesh);
+
+            // Right Angles
+            dynamicGroup.add(createRightAngle(pA, new THREE.Vector3(0,1,0), new THREE.Vector3(1,0,0), 0.8, palette.dark));
+            
+            if(isRightAngle) {
+                dynamicGroup.add(createRightAngle(pB, new THREE.Vector3(-1,0,0), new THREE.Vector3(0,0,1), 0.8, palette.red));
+                const dirPB = new THREE.Vector3().subVectors(pP, pB).normalize();
+                dynamicGroup.add(createRightAngle(pB, dirPB, new THREE.Vector3(0,0,1), 0.8, palette.green));
+            }
+
+            // Labels
+            addLabel('P', pP.clone().add(new THREE.Vector3(0, 0.5, 0)), 'text-[#4a4238] text-xl');
+            addLabel('A', pA.clone().add(new THREE.Vector3(-0.6, 0, 0)));
+            addLabel('C', pC.clone().add(new THREE.Vector3(0.6, 0, -0.6)));
+            addLabel('D', pD.clone().add(new THREE.Vector3(0.6, 0, 0.6)));
+            addLabel('B', pB.clone().add(new THREE.Vector3(0.8, -0.4, 0)), isRightAngle ? 'text-[#829e88] text-xl' : 'text-[#c67b6b] text-xl');
+            addLabel('<div class="label-bg">底面 ACD</div>', new THREE.Vector3(2, 0, 2));
+
+            // UI
+            ui.angleABC.innerText = `${displayABC.toFixed(1)}°`;
+            const anglePBC = Math.acos(vecPB.normalize().dot(dirCD)) * 180 / Math.PI;
+            ui.anglePBC.innerText = `${(zB <= 0 ? anglePBC : 180 - anglePBC).toFixed(1)}°`;
+
+            if(isRightAngle) {
+                ui.statusM1.className = "feedback-box feedback-success p-4 rounded-r-lg flex flex-col gap-2 mt-2";
+                ui.angleABC.style.color = '#829e88';
+                ui.anglePBC.style.color = '#829e88';
+                ui.msgM1.innerHTML = "✓ 已達成 AB ⊥ CD，因此 <b>PB ⊥ CD</b> 成立！";
+                ui.msgM1.style.color = '#829e88';
+            } else {
+                ui.statusM1.className = "feedback-box feedback-normal p-4 rounded-r-lg flex flex-col gap-2 mt-2";
+                ui.angleABC.style.color = '#4a4238';
+                ui.anglePBC.style.color = '#4a4238';
+                ui.msgM1.innerHTML = "請移動點 B，直到 AB ⊥ CD";
+                ui.msgM1.style.color = '#c67b6b';
+            }
+        }
+
+        // --- Build Mode 2: 二面角 (三角錐) ---
+        function buildMode2Pyramid() {
+            const h = state.m2p.h_v;
+            const r = 4;
+            const pA = new THREE.Vector3(0, 0, -r);
+            const pB = new THREE.Vector3(-r * Math.cos(Math.PI/6), 0, r * Math.sin(Math.PI/6));
+            const pC = new THREE.Vector3(r * Math.cos(Math.PI/6), 0, r * Math.sin(Math.PI/6));
+            const pV = new THREE.Vector3(0, h, 0);
+            
+            const pM = new THREE.Vector3().addVectors(pB, pC).multiplyScalar(0.5); 
+
+            dynamicGroup.add(createTriangleFace(pA, pB, pC, mats.faceBase)); 
+            dynamicGroup.add(createTriangleFace(pV, pA, pB, mats.face));
+            dynamicGroup.add(createTriangleFace(pV, pA, pC, mats.face));
+            dynamicGroup.add(createTriangleFace(pV, pB, pC, createMat(0xeae4d8, 0.9))); 
+
+            const addEdge = (p1, p2, mat, rad=0.04) => dynamicGroup.add(createCylinder(p1, p2, mat, rad));
+            addEdge(pV, pA, mats.lineDark);
+            addEdge(pV, pB, mats.lineDark);
+            addEdge(pV, pC, mats.lineDark);
+            addEdge(pA, pB, mats.lineDark);
+            addEdge(pA, pC, mats.lineDark);
+            addEdge(pB, pC, new THREE.MeshBasicMaterial({ color: 0x5b6c7a }), 0.08); 
+
+            addEdge(pV, pM, mats.lineBlue, 0.08); 
+            addEdge(pA, pM, mats.lineRed, 0.08); 
+
+            [pV, pA, pB, pC, pM].forEach(p => {
+                const mesh = createSphere(p, mats.point, 0.15);
+                mesh.position.copy(p);
+                dynamicGroup.add(mesh);
+            });
+
+            const dirMB = new THREE.Vector3().subVectors(pB, pM).normalize();
+            const dirMA = new THREE.Vector3().subVectors(pA, pM).normalize();
+            const dirMV = new THREE.Vector3().subVectors(pV, pM).normalize();
+            
+            dynamicGroup.add(createRightAngle(pM, dirMA, dirMB, 0.8, palette.red)); 
+            dynamicGroup.add(createRightAngle(pM, dirMV, dirMB, 0.8, palette.blue)); 
+
+            const angleRad = dirMA.angleTo(dirMV);
+            const arcRadius = 1.5;
+            const arcPts = [];
+            
+            // 使用外積取得垂直於 MA 與 MV 兩向量的旋轉軸 (必定平行交線 BC)
+            let axisPyramid = dirMA.clone().cross(dirMV);
+            if (axisPyramid.lengthSq() < 0.0001) axisPyramid = new THREE.Vector3(1,0,0);
+            else axisPyramid.normalize();
+
+            for(let i=0; i<=20; i++){
+                const a = angleRad * (i/20);
+                const v = dirMA.clone().applyAxisAngle(axisPyramid, a);
+                arcPts.push(pM.clone().add(v.multiplyScalar(arcRadius)));
+            }
+            const arcGeo = new THREE.BufferGeometry().setFromPoints(arcPts);
+            dynamicGroup.add(new THREE.Line(arcGeo, new THREE.LineBasicMaterial({ color: palette.gold, linewidth: 3 })));
+
+            addLabel('V', pV.clone().add(new THREE.Vector3(0, 0.5, 0)), 'text-xl');
+            addLabel('A', pA.clone().add(new THREE.Vector3(0, 0, -0.6)));
+            addLabel('B', pB.clone().add(new THREE.Vector3(-0.6, 0, 0.6)));
+            addLabel('C', pC.clone().add(new THREE.Vector3(0.6, 0, 0.6)));
+            addLabel('M', pM.clone().add(new THREE.Vector3(0, -0.5, 0)), 'text-lg text-[#c67b6b]');
+            addLabel('交線 BC', pB.clone().lerp(pC, 0.2).add(new THREE.Vector3(0,-0.6,0)), 'text-sm text-[#5b6c7a]');
+            
+            ui.angleVMA.innerText = `${(angleRad * 180 / Math.PI).toFixed(1)}°`;
+        }
+
+        // --- Build Mode 3: 二面角 (摺紙 - 統一邏輯) ---
+        function buildMode2Paper() {
+            const isSquare = state.paperShape === 'square';
+            const isDiag = state.foldType === 'diagonal';
+
+            const W = isSquare ? 8 : 10;
+            const H = isSquare ? 8 : 6;
+
+            const thetaDeg = state.m2f.foldAngle;
+            const thetaRad = thetaDeg * Math.PI / 180;
+            const phiRad = Math.PI - thetaRad; // 旋轉角度 (平鋪180度時 phi=0)
+
+            // 平鋪時的四個頂點座標 (置中於原點)
+            const pA_flat = new THREE.Vector3(-W/2, 0, -H/2);
+            const pB_flat = new THREE.Vector3(W/2, 0, -H/2);
+            const pC_flat = new THREE.Vector3(W/2, 0, H/2);
+            const pD_flat = new THREE.Vector3(-W/2, 0, H/2);
+
+            let faces = [], edges = [];
+            let foldAxisDir, vFixed, vMovingFlat, pArcCenter;
+            let pA_rot, pD_rot;
+
+            if (!isDiag) {
+                // 邊對齊對摺 (摺痕在 Z 軸)
+                foldAxisDir = new THREE.Vector3(0, 0, -1);
+                pArcCenter = new THREE.Vector3(0, 0, 0);
+
+                const pMtop = new THREE.Vector3(0, 0, -H/2);
+                const pMbot = new THREE.Vector3(0, 0, H/2);
+
+                // 旋轉左半邊 (A, D)
+                pA_rot = pA_flat.clone().applyAxisAngle(foldAxisDir, phiRad);
+                pD_rot = pD_flat.clone().applyAxisAngle(foldAxisDir, phiRad);
+
+                faces.push({ pts: [pMtop, pB_flat, pC_flat, pMbot], mat: mats.facePaper1 });
+                faces.push({ pts: [pA_rot, pMtop, pMbot, pD_rot], mat: mats.facePaper2 });
+
+                edges.push([pMtop, pMbot, new THREE.MeshBasicMaterial({color: 0x888888}), 0.04]); // 摺痕
+
+                vFixed = new THREE.Vector3(1, 0, 0); // 固定面垂直線
+                vMovingFlat = new THREE.Vector3(-1, 0, 0); // 摺疊面垂直線(平鋪時)
+                
+                addLabel('A', pA_rot.clone().add(new THREE.Vector3(-0.5, 0.5, 0)));
+                addLabel('B', pB_flat.clone().add(new THREE.Vector3(0.5, 0, -0.5)));
+                addLabel('C', pC_flat.clone().add(new THREE.Vector3(0.5, 0, 0.5)));
+                addLabel('D', pD_rot.clone().add(new THREE.Vector3(-0.5, 0.5, 0)));
+            } else {
+                // 對角線對摺 (摺痕從 D 到 B)
+                foldAxisDir = new THREE.Vector3(W, 0, -H).normalize();
+                pArcCenter = new THREE.Vector3(0, 0, 0);
+
+                // 旋轉 A 點
+                pA_rot = pA_flat.clone().applyAxisAngle(foldAxisDir, phiRad);
+
+                faces.push({ pts: [pB_flat, pC_flat, pD_flat], mat: mats.facePaper1 });
+                faces.push({ pts: [pA_rot, pB_flat, pD_flat], mat: mats.facePaper2 });
+
+                edges.push([pB_flat, pD_flat, new THREE.MeshBasicMaterial({color: 0x888888}), 0.04]);
+
+                vFixed = new THREE.Vector3(H, 0, W).normalize();
+                vMovingFlat = new THREE.Vector3(-H, 0, -W).normalize();
+
+                addLabel('A', pA_rot.clone().add(new THREE.Vector3(-0.5, 0.5, 0)));
+                addLabel('B', pB_flat.clone().add(new THREE.Vector3(0.5, 0, -0.5)));
+                addLabel('C', pC_flat.clone().add(new THREE.Vector3(0.5, 0, 0.5)));
+                addLabel('D', pD_flat.clone().add(new THREE.Vector3(-0.5, 0, 0.5))); // 對角對摺時，D為固定點
+            }
+
+            // 繪製紙張網格
+            faces.forEach(f => {
+                if (f.pts.length === 4) {
+                    const geo = new THREE.BufferGeometry();
+                    const v = new Float32Array([
+                        f.pts[0].x, f.pts[0].y, f.pts[0].z, f.pts[1].x, f.pts[1].y, f.pts[1].z, f.pts[2].x, f.pts[2].y, f.pts[2].z,
+                        f.pts[0].x, f.pts[0].y, f.pts[0].z, f.pts[2].x, f.pts[2].y, f.pts[2].z, f.pts[3].x, f.pts[3].y, f.pts[3].z,
+                    ]);
+                    geo.setAttribute('position', new THREE.BufferAttribute(v, 3));
+                    geo.computeVertexNormals();
+                    dynamicGroup.add(new THREE.Mesh(geo, f.mat));
+                } else {
+                    dynamicGroup.add(createTriangleFace(f.pts[0], f.pts[1], f.pts[2], f.mat));
+                }
+            });
+            edges.forEach(e => dynamicGroup.add(createCylinder(e[0], e[1], e[2], e[3])));
+
+            // 計算二面角視覺化線條
+            const vMovingRot = vMovingFlat.clone().applyAxisAngle(foldAxisDir, phiRad);
+            const arcRadius = isDiag ? Math.min(W, H) * 0.4 : W * 0.4;
+            
+            const pR = pArcCenter.clone().add(vFixed.clone().multiplyScalar(arcRadius));
+            const pL = pArcCenter.clone().add(vMovingRot.clone().multiplyScalar(arcRadius));
+
+            dynamicGroup.add(createCylinder(pArcCenter, pR, mats.lineGreen, 0.06));
+            dynamicGroup.add(createCylinder(pArcCenter, pL, mats.lineRed, 0.06));
+            
+            [pArcCenter, pR, pL].forEach(p => {
+                const mesh = createSphere(p, mats.point, 0.1);
+                mesh.position.copy(p);
+                dynamicGroup.add(mesh);
+            });
+
+            // 直角符號
+            dynamicGroup.add(createRightAngle(pArcCenter, foldAxisDir, vFixed, 0.6, palette.green));
+            dynamicGroup.add(createRightAngle(pArcCenter, foldAxisDir.clone().negate(), vMovingRot, 0.6, palette.red));
+
+            // 二面角圓弧
+            const arcPts = [];
+            
+            // 使用外積取得垂直於兩平面的旋轉軸 (必定與摺痕重合)
+            let axisPaper = vFixed.clone().cross(vMovingRot);
+            if (axisPaper.lengthSq() < 0.0001) {
+                // 當 180 度平鋪時，外積為 0。為了讓弧線始終朝上(+Y)，我們利用 vFixed 與 Y 軸的公垂向量作為旋轉軸
+                axisPaper = vFixed.clone().cross(new THREE.Vector3(0, 1, 0)).normalize();
+            } else {
+                axisPaper.normalize();
+            }
+            const angleTotal = vFixed.angleTo(vMovingRot);
+            
+            for(let i=0; i<=20; i++){
+                const a = angleTotal * (i/20);
+                const v = vFixed.clone().applyAxisAngle(axisPaper, a);
+                arcPts.push(pArcCenter.clone().add(v.multiplyScalar(arcRadius)));
+            }
+            const arcGeo = new THREE.BufferGeometry().setFromPoints(arcPts);
+            dynamicGroup.add(new THREE.Line(arcGeo, new THREE.LineBasicMaterial({ color: palette.dark, linewidth: 2 })));
+
+            addLabel('交線(摺痕)', pArcCenter.clone().add(foldAxisDir.clone().multiplyScalar(-W*0.3)).add(new THREE.Vector3(0,-0.6,0)), 'text-sm text-stone-500');
+            
+            const vMid = vFixed.clone().applyAxisAngle(axisPaper, angleTotal * 0.5);
+            addLabel(`<div class="label-bg">二面角 ${thetaDeg}°</div>`, pArcCenter.clone().add(vMid.multiplyScalar(arcRadius + 0.6)));
+
+            ui.angleFold.innerText = `${thetaDeg}°`;
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderLabels();
+            renderer.render(scene, camera);
+        }
+
+        setMode('m1');
+        animate();
+    </script>
+</body>
+</html>
